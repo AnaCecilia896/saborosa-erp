@@ -161,7 +161,7 @@ select.input-field{appearance:none;background-image:url("data:image/svg+xml,%3Cs
   <!-- ==================== ESTOQUE ==================== -->
   <section id="tab-estoque" class="tab-section">
     <div class="section-title">Controle de Estoque</div>
-    <div class="section-sub">Entradas por notas de compra • Saídas manuais</div>
+    <div class="section-sub">Gerencie insumos, estoque ideal e inventário</div>
 
     <div class="grid grid-cols-2 gap-3 mb-4">
       <div class="kpi"><div class="kpi-lbl">Insumos ativos</div><div class="kpi-val" id="kpi-estoque-itens">0</div></div>
@@ -175,7 +175,7 @@ select.input-field{appearance:none;background-image:url("data:image/svg+xml,%3Cs
         <button onclick="toggleNovoProduto()" id="btn-toggle-novo" class="text-xs font-bold text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg">+ Novo</button>
       </div>
       <div id="form-novo-produto" class="hidden">
-        <div class="text-xs text-slate-400 mb-3">Adicione um produto que ainda não está no catálogo. Ele ficará disponível no autocomplete de compras.</div>
+        <div class="text-xs text-slate-400 mb-3">Adicione um produto que ainda não está no catálogo.</div>
         <div class="grid grid-cols-2 gap-3 mb-3">
           <div class="col-span-2"><label class="input-label">Nome Do Produto</label><input type="text" id="novo-prod-nome" class="input-field" placeholder="Ex: Tempero Baiano 500g"></div>
           <div><label class="input-label">Unidade</label>
@@ -187,40 +187,16 @@ select.input-field{appearance:none;background-image:url("data:image/svg+xml,%3Cs
         </div>
         <button onclick="addNovoProdutoCatalogo()" class="btn-primary">Salvar No Catálogo</button>
       </div>
-      <!-- Lista de produtos customizados -->
       <div id="lista-catalogo-custom" class="hidden mt-3"></div>
     </div>
 
+    <!-- Lista unificada de insumos -->
     <div class="card mb-4">
-      <div class="font-bold text-slate-700 mb-3">Ajuste Manual de Estoque</div>
-      <div class="grid grid-cols-2 gap-3 mb-3">
-        <div><label class="input-label">Produto</label><input type="text" id="aj-prod" list="sugestoes-insumos-2" class="input-field" placeholder="Nome do insumo"><datalist id="sugestoes-insumos-2"></datalist></div>
-        <div><label class="input-label">Unidade</label><select id="aj-unid" class="input-field"><option>KG</option><option>UND</option><option>LITRO</option><option>CAIXA</option><option>PCT</option><option>SACO</option></select></div>
-      </div>
-      <div class="grid grid-cols-2 gap-3 mb-3">
-        <div><label class="input-label">Tipo</label><select id="aj-tipo" class="input-field"><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-        <div><label class="input-label">Quantidade</label><input type="number" id="aj-qtd" step="0.01" min="0.01" class="input-field" placeholder="0,00"></div>
-      </div>
-      <div class="mb-3"><label class="input-label">Motivo</label><input type="text" id="aj-motivo" class="input-field" placeholder="Ex: Contagem de inventário, perda, etc."></div>
-      <button onclick="salvarAjusteEstoque()" class="btn-primary">Registrar Ajuste</button>
-    </div>
-
-    <div class="card mb-4">
-      <div class="flex items-center justify-between mb-3">
-        <div class="font-bold text-slate-700">Estoque Ideal por Insumo</div>
-        <button onclick="toggleIdealForm()" class="text-xs font-bold text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg">Configurar</button>
-      </div>
-      <div id="ideal-form" class="hidden">
-        <div class="text-xs text-slate-400 mb-3">Defina a quantidade mínima ideal de cada insumo. O sistema calculará automaticamente o quanto comprar.</div>
-        <input type="text" id="ideal-busca" class="input-field mb-3" placeholder="🔍 Buscar insumo..." oninput="renderIdealInputs()">
-        <div id="ideal-inputs" style="max-height:320px;overflow-y:auto"></div>
-        <button onclick="salvarIdeais()" class="btn-primary mt-3">Salvar Quantidades Ideais</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="font-bold text-slate-700 mb-3">Posição Atual do Estoque</div>
-      <div id="lista-estoque"><div class="text-center py-8 text-slate-300 text-sm">Nenhum lançamento encontrado</div></div>
+      <div class="font-bold text-slate-700 mb-1">Lista de Insumos</div>
+      <div class="text-xs text-slate-400 mb-3">Defina o estoque ideal, registre o inventário físico e remova cadastros errados.</div>
+      <input type="text" id="ideal-busca" class="input-field mb-3" placeholder="🔍 Buscar insumo..." oninput="renderIdealInputs()">
+      <div id="ideal-inputs"></div>
+      <button onclick="salvarConfigEstoque()" class="btn-primary mt-4">💾 Salvar Alterações</button>
     </div>
 
     <!-- Card de sugestão de compra -->
@@ -1290,9 +1266,35 @@ function alertaPreco(produto, precoCompra) {
 // ==========================================
 // ESTOQUE
 // ==========================================
-// ---- ESTOQUE IDEAL ----
+// ---- ESTOQUE IDEAL E INVENTÁRIO ----
 function getIdeais() {
   try { return JSON.parse(localStorage.getItem('saborosa_ideais') || '{}'); } catch { return {}; }
+}
+function getInventarios() {
+  try { return JSON.parse(localStorage.getItem('saborosa_inventario') || '{}'); } catch { return {}; }
+}
+function salvarConfigEstoque() {
+  const ideais = {};
+  document.querySelectorAll('[data-ideal-input]').forEach(inp => {
+    const v = parseFloat(inp.value);
+    if (!isNaN(v) && v > 0) ideais[inp.dataset.idealInput] = v;
+  });
+  localStorage.setItem('saborosa_ideais', JSON.stringify(ideais));
+
+  const inventarios = getInventarios();
+  const ts = Date.now();
+  document.querySelectorAll('[data-inventario-input]').forEach(inp => {
+    const v = parseFloat(inp.value);
+    const produto = inp.dataset.inventarioInput;
+    const unidade = inp.dataset.unidade || '';
+    if (inp.value !== '' && !isNaN(v) && v >= 0) {
+      inventarios[produto] = { qty: v, unidade, timestamp: ts };
+    }
+  });
+  localStorage.setItem('saborosa_inventario', JSON.stringify(inventarios));
+
+  renderEstoque();
+  showToast('✅ Alterações salvas!');
 }
 function salvarIdeais() {
   const ideais = {};
@@ -1312,9 +1314,10 @@ function toggleIdealForm() {
 function renderIdealInputs() {
   const posicao = calcPosicao();
   const ideais = getIdeais();
+  const inventarios = getInventarios();
   const el = document.getElementById('ideal-inputs');
+  if (!el) return;
 
-  // Base: catálogo completo + insumos que já entraram via compras mas não estão no catálogo
   const nomesExtra = Object.keys(posicao).filter(
     n => !getCatalogoCompleto().some(c => c.nome.toLowerCase() === n.toLowerCase())
   );
@@ -1323,45 +1326,89 @@ function renderIdealInputs() {
     ...nomesExtra.map(n => ({ produto: n, unidade: posicao[n]?.unidade || 'UND' }))
   ];
 
-  // Busca de filtro
   const busca = (document.getElementById('ideal-busca')?.value || '').toLowerCase();
-  const filtrados = busca
-    ? todosItens.filter(i => i.produto.toLowerCase().includes(busca))
-    : todosItens;
+  const filtrados = busca ? todosItens.filter(i => i.produto.toLowerCase().includes(busca)) : todosItens;
 
-  if (!filtrados.length) { el.innerHTML = '<div class="text-xs text-slate-300 py-4 text-center">Nenhum insumo encontrado.</div>'; return; }
+  if (!filtrados.length) {
+    el.innerHTML = '<div class="text-xs text-slate-300 py-4 text-center">Nenhum insumo encontrado.</div>';
+    return;
+  }
 
   el.innerHTML = filtrados.map(i => {
-    const saldo = posicao[i.produto] ? (posicao[i.produto].entrada - posicao[i.produto].saida) : null;
-    const saldoTxt = saldo !== null ? `<span class="text-[10px] text-slate-400 ml-1">Atual: ${saldo.toFixed(1)} ${i.unidade}</span>` : '';
-    const nomeEscapado = i.produto.replace(/'/g, "\\'");
-    return `<div class="flex items-center gap-2 py-2 border-b border-gray-50">
-      <button onclick="ocultarDoCatalogo('${nomeEscapado}')" title="Remover do catálogo"
-        class="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 transition text-base">🗑️</button>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium text-slate-700 truncate">${i.produto}</div>
-        <div class="text-[10px] text-slate-400">${i.unidade}${saldoTxt}</div>
+    const pos = posicao[i.produto];
+    const saldo = pos ? (pos.entrada - pos.saida) : null;
+    const ideal = ideais[i.produto] || null;
+    const invAtual = inventarios[i.produto]?.qty ?? '';
+    const pct = (ideal && saldo !== null) ? Math.min(100, (saldo / ideal) * 100) : null;
+
+    let cls = 'badge-blue', label = 'Sem meta';
+    if (saldo !== null && ideal) {
+      cls = pct <= 25 ? 'badge-red' : pct <= 60 ? 'badge-orange' : 'badge-green';
+      label = pct <= 25 ? 'Crítico' : pct <= 60 ? 'Baixo' : 'OK';
+    }
+
+    const nomeEsc = i.produto.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const saldoTxt = saldo !== null ? `· Atual: <b>${saldo.toFixed(2)}</b> ${i.unidade}` : '· Sem movimentação';
+
+    return `<div class="py-3 border-b border-gray-50 last:border-0">
+      <div class="flex items-center gap-2 mb-2">
+        <button onclick="ocultarDoCatalogo('${nomeEsc}')" title="Remover do catálogo"
+          class="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 transition text-sm">🗑️</button>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-semibold text-slate-800 truncate">${i.produto}</div>
+          <div class="text-xs text-slate-400">${saldoTxt}</div>
+        </div>
+        <span class="badge ${cls}">${label}</span>
       </div>
-      <input type="number" step="0.1" min="0" placeholder="—" data-ideal-input="${i.produto}"
-        value="${ideais[i.produto] || ''}"
-        class="w-20 text-sm text-right border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-orange-400 shrink-0">
+      <div class="grid grid-cols-2 gap-2 pl-9">
+        <div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase mb-1">Estoque Ideal</div>
+          <input type="number" step="0.1" min="0" placeholder="—"
+            data-ideal-input="${i.produto}"
+            value="${ideais[i.produto] || ''}"
+            class="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-orange-400">
+        </div>
+        <div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase mb-1">Inventário Atual</div>
+          <input type="number" step="0.01" min="0" placeholder="—"
+            data-inventario-input="${i.produto}"
+            data-unidade="${i.unidade}"
+            value="${invAtual}"
+            class="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-orange-400">
+        </div>
+      </div>
     </div>`;
   }).join('');
 }
 
 function calcPosicao() {
+  const inventarios = getInventarios();
   const posicao = {};
+
+  // Seed com inventários salvos como base absoluta
+  Object.entries(inventarios).forEach(([produto, inv]) => {
+    posicao[produto] = { produto, unidade: inv.unidade || '', entrada: inv.qty, saida: 0, inventarioTs: inv.timestamp || 0 };
+  });
+
+  // Compras: só soma as que entraram APÓS o inventário
   S.data.compras.forEach(c => {
     const k = c.produto; if (!k) return;
-    if (!posicao[k]) posicao[k] = { produto: k, unidade: c.unidade || '', entrada: 0, saida: 0 };
+    const invTs = posicao[k]?.inventarioTs || 0;
+    if ((c.timestamp || 0) < invTs) return;
+    if (!posicao[k]) posicao[k] = { produto: k, unidade: c.unidade || '', entrada: 0, saida: 0, inventarioTs: 0 };
     posicao[k].entrada += c.quantidade || 0;
   });
+
+  // Ajustes: mesma lógica
   S.data.ajustes.forEach(a => {
     const k = a.produto; if (!k) return;
-    if (!posicao[k]) posicao[k] = { produto: k, unidade: a.unidade || '', entrada: 0, saida: 0 };
+    const invTs = posicao[k]?.inventarioTs || 0;
+    if ((a.timestamp || 0) < invTs) return;
+    if (!posicao[k]) posicao[k] = { produto: k, unidade: a.unidade || '', entrada: 0, saida: 0, inventarioTs: 0 };
     if (a.tipo === 'entrada') posicao[k].entrada += a.quantidade || 0;
     else posicao[k].saida += a.quantidade || 0;
   });
+
   return posicao;
 }
 
@@ -1379,76 +1426,33 @@ function renderEstoque() {
   document.getElementById('kpi-estoque-itens').textContent = items.length;
   document.getElementById('kpi-estoque-baixo').textContent = baixo;
 
-  const lista = document.getElementById('lista-estoque');
-  if (!items.length) {
-    lista.innerHTML = '<div class="text-center py-8 text-slate-300 text-sm">Lance notas de compra para ver o estoque</div>';
-    document.getElementById('card-sugestao').classList.add('hidden');
-    return;
-  }
-
+  // Sugestão de compra
   const sugestoes = [];
+  items.forEach(i => {
+    const saldo = i.entrada - i.saida;
+    const ideal = ideais[i.produto] || null;
+    const falta = ideal ? Math.max(0, ideal - saldo) : 0;
+    if (falta > 0) sugestoes.push({ produto: i.produto, unidade: i.unidade, saldo, ideal, falta });
+  });
 
-  lista.innerHTML = items
-    .sort((a, b) => {
-      // Prioriza os com saldo mais baixo em relação ao ideal
-      const saldoA = a.entrada - a.saida, saldoB = b.entrada - b.saida;
-      const pctA = ideais[a.produto] ? saldoA / ideais[a.produto] : 1;
-      const pctB = ideais[b.produto] ? saldoB / ideais[b.produto] : 1;
-      return pctA - pctB;
-    })
-    .map(i => {
-      const saldo = i.entrada - i.saida;
-      const ideal = ideais[i.produto] || null;
-      const falta = ideal ? Math.max(0, ideal - saldo) : 0;
-      const pct = ideal ? Math.min(100, (saldo / ideal) * 100) : null;
-
-      // Status baseado no ideal ou fallback para valor fixo
-      let cls, label;
-      if (ideal) {
-        cls = pct <= 25 ? 'badge-red' : pct <= 60 ? 'badge-orange' : 'badge-green';
-        label = pct <= 25 ? 'Crítico' : pct <= 60 ? 'Baixo' : 'OK';
-      } else {
-        cls = saldo < 1 ? 'badge-red' : saldo < 5 ? 'badge-orange' : 'badge-green';
-        label = saldo < 1 ? 'Crítico' : saldo < 5 ? 'Baixo' : 'OK';
-      }
-
-      if (falta > 0) sugestoes.push({ produto: i.produto, unidade: i.unidade, saldo, ideal, falta });
-
-      return `<div class="estoque-item">
-        <div class="flex-1">
-          <div class="font-semibold text-sm text-slate-800">${i.produto}</div>
-          <div class="text-xs text-slate-400">
-            Atual: <b class="text-slate-600">${saldo.toFixed(2)} ${i.unidade}</b>
-            ${ideal ? `· Ideal: <b>${ideal} ${i.unidade}</b>` : ''}
-          </div>
-          ${ideal && pct !== null ? `
-            <div class="progress-track mt-1.5" style="width:120px">
-              <div class="progress-fill" style="width:${pct}%;background:${pct<=25?'#ef4444':pct<=60?'#f97316':'#22c55e'}"></div>
-            </div>` : ''}
-        </div>
-        <div class="flex flex-col items-end gap-1 ml-2">
-          <span class="badge ${cls}">${label}</span>
-          ${falta > 0 ? `<span class="text-xs text-orange-600 font-bold">Comprar: ${falta.toFixed(2)} ${i.unidade}</span>` : ''}
-        </div>
-      </div>`;
-    }).join('');
-
-  // Card de sugestão
   const cardSug = document.getElementById('card-sugestao');
   if (sugestoes.length) {
     cardSug.classList.remove('hidden');
-    document.getElementById('lista-sugestao').innerHTML = sugestoes.map(s =>
-      `<div class="flex justify-between items-center py-2 border-b border-orange-100 text-sm">
+    document.getElementById('lista-sugestao').innerHTML = sugestoes
+      .sort((a, b) => (a.saldo / a.ideal) - (b.saldo / b.ideal))
+      .map(s => `<div class="flex justify-between items-center py-2 border-b border-orange-100 text-sm">
         <div>
           <span class="font-semibold text-slate-700">${s.produto}</span>
           <span class="text-slate-400 text-xs ml-1">Atual: ${s.saldo.toFixed(2)} / Ideal: ${s.ideal}</span>
         </div>
         <span class="font-black text-orange-600">+ ${s.falta.toFixed(2)} ${s.unidade}</span>
-      </div>`
-    ).join('');
+      </div>`).join('');
   } else {
     cardSug.classList.add('hidden');
   }
+
+  // Atualiza a lista unificada de insumos
+  renderIdealInputs();
 }
 
 async function salvarAjusteEstoque() {
@@ -1741,6 +1745,7 @@ window.atualizarResumoPgto = atualizarResumoPgto;
 window.confirmarVenda = confirmarVenda;
 window.toggleIdealForm = toggleIdealForm;
 window.salvarIdeais = salvarIdeais;
+window.salvarConfigEstoque = salvarConfigEstoque;
 window.autoPreencherPreco = autoPreencherPreco;
 window.renderIdealInputs = renderIdealInputs;
 window.toggleNovoProduto = toggleNovoProduto;
