@@ -951,6 +951,23 @@
       </div>
       <div style="margin-top:14px;text-align:center">
         <button class="auth-link" onclick="usarSomenteLocal()">Continuar sem sincronizar (só neste navegador)</button>
+        <br>
+        <button class="auth-link" style="color:#888" onclick="mostrarConfigConexao()">Configurar conexão com o banco</button>
+      </div>
+
+      <div id="auth-conexao" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid #e0dbd0">
+        <div style="font-size:11.5px;color:#888;margin-bottom:10px">
+          Use isto se o projeto do Supabase foi recriado. Pegue os dois valores em
+          <strong>Project Settings &rarr; API</strong>.
+        </div>
+        <div class="field"><label>URL do projeto</label>
+          <input type="text" id="conex-url" placeholder="https://xxxxxxxx.supabase.co"></div>
+        <div class="field"><label>Chave publishable (anon)</label>
+          <input type="text" id="conex-key" placeholder="sb_publishable_..."></div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-primary btn-sm" onclick="aplicarConexaoNuvem()">Testar e salvar</button>
+          <button class="btn btn-ghost btn-sm" onclick="restaurarConexaoPadrao()">Voltar ao padrão</button>
+        </div>
       </div>
     </div>
 
@@ -3905,12 +3922,31 @@ function renderKPI(id, items) {
    14. SINCRONIZAÇÃO NA NUVEM (SUPABASE)
    ===================================================================== */
 
-const SUPABASE_URL = 'https://tnwlawafczchavcbmtza.supabase.co';
+// Projeto padrão. Se um dia o projeto for recriado, dá para apontar o sistema
+// para o novo endereço pela própria tela de acesso, sem mexer neste arquivo.
+const SUPABASE_URL_PADRAO = 'https://tnwlawafczchavcbmtza.supabase.co';
 // Chave pública: feita para ficar no navegador. O que protege os dados são
 // as regras de acesso (RLS) definidas em supabase_schema.sql, não esta chave.
-const SUPABASE_KEY = 'sb_publishable_1taxrg-KYI_2G9-KWgqaxQ_CIjcqvMy';
+const SUPABASE_KEY_PADRAO = 'sb_publishable_1taxrg-KYI_2G9-KWgqaxQ_CIjcqvMy';
 
 const MODO_LOCAL_KEY = 'saborosa_modo_local';
+const CONEXAO_KEY = 'saborosa_conexao';
+
+/** Endereço e chave em uso: o que estiver salvo neste navegador vence o padrão. */
+function conexaoNuvem() {
+  try {
+    const s = localStorage.getItem(CONEXAO_KEY);
+    if (s) {
+      const c = JSON.parse(s);
+      if (c && c.url && c.key) return { url: String(c.url).replace(/\/+$/, ''), key: c.key };
+    }
+  } catch (e) { /* configuração corrompida: usa o padrão */ }
+  return { url: SUPABASE_URL_PADRAO, key: SUPABASE_KEY_PADRAO };
+}
+
+function salvarConexaoNuvem(url, key) {
+  localStorage.setItem(CONEXAO_KEY, JSON.stringify({ url: String(url).trim().replace(/\/+$/, ''), key: String(key).trim() }));
+}
 
 let sb = null;
 const nuvem = {
@@ -3955,23 +3991,104 @@ function estadoAtualSync() {
 
 /* ---------- Início e autenticação ---------- */
 
-function nuvemIniciar() {
+/** O projeto responde? Distingue "pausado/apagado" de "senha errada". */
+async function projetoAlcancavel() {
+  const { url, key } = conexaoNuvem();
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 12000);
+    const r = await fetch(url + '/auth/v1/settings', {
+      headers: { apikey: key }, signal: ctrl.signal
+    });
+    clearTimeout(t);
+    return r.ok || r.status === 401 || r.status === 403;  // respondeu = está de pé
+  } catch (e) {
+    return false;   // DNS inexistente, projeto pausado ou sem internet
+  }
+}
+
+async function nuvemIniciar() {
   if (!window.supabase || !window.supabase.createClient) {
     nuvem.erro = 'biblioteca';
     renderNuvem();
     return;
   }
-  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { url, key } = conexaoNuvem();
+  sb = window.supabase.createClient(url, key);
 
-  sb.auth.getSession().then(({ data }) => {
+  const dePe = await projetoAlcancavel();
+  if (!dePe) {
+    nuvem.erro = 'projeto';
+    renderNuvem();
+    if (localStorage.getItem(MODO_LOCAL_KEY) !== '1') {
+      abrirTelaAcesso();
+      authMsg(msgProjetoFora(), 'erro');
+      mostrarConfigConexao(true);
+    }
+    return;
+  }
+
+  try {
+    const { data } = await sb.auth.getSession();
     if (data && data.session) {
-      aposLogin(data.session);
+      await aposLogin(data.session);
     } else if (localStorage.getItem(MODO_LOCAL_KEY) === '1') {
       renderNuvem();   // a pessoa já escolheu ficar offline
     } else {
       abrirTelaAcesso();
     }
-  }).catch(() => { nuvem.erro = 'conexao'; renderNuvem(); });
+  } catch (e) {
+    nuvem.erro = 'projeto';
+    renderNuvem();
+  }
+}
+
+function msgProjetoFora() {
+  const { url } = conexaoNuvem();
+  return 'O banco de dados não respondeu (' + url.replace('https://', '') + '). ' +
+         'No plano gratuito o Supabase pausa projetos parados por 7 dias: entre em supabase.com, ' +
+         'abra o projeto e clique em Restore. Se ele foi apagado, crie outro e informe o novo endereço abaixo. ' +
+         'Enquanto isso você pode trabalhar só neste navegador.';
+}
+
+function mostrarConfigConexao(abrir) {
+  const bloco = document.getElementById('auth-conexao');
+  if (!bloco) return;
+  const visivel = abrir !== undefined ? abrir : bloco.style.display === 'none';
+  bloco.style.display = visivel ? '' : 'none';
+  if (visivel) {
+    const { url, key } = conexaoNuvem();
+    document.getElementById('conex-url').value = url;
+    document.getElementById('conex-key').value = key;
+  }
+}
+
+async function aplicarConexaoNuvem() {
+  const url = document.getElementById('conex-url').value.trim();
+  const key = document.getElementById('conex-key').value.trim();
+  if (!/^https:\/\/.+\.supabase\.co$/.test(url.replace(/\/+$/, ''))) {
+    authMsg('O endereço deve ser parecido com https://xxxxxxxx.supabase.co', 'erro'); return;
+  }
+  if (!key) { authMsg('Cole também a chave publishable (anon) do projeto.', 'erro'); return; }
+
+  salvarConexaoNuvem(url, key);
+  authMsg('Testando o novo endereço…', 'info');
+  sb = window.supabase.createClient(conexaoNuvem().url, conexaoNuvem().key);
+
+  if (await projetoAlcancavel()) {
+    nuvem.erro = null;
+    authMsg('✓ Projeto respondeu. Agora entre ou crie sua conta.', 'ok');
+    mostrarConfigConexao(false);
+  } else {
+    authMsg('Esse endereço também não respondeu. Confira se o projeto está ativo no supabase.com.', 'erro');
+  }
+  renderNuvem();
+}
+
+function restaurarConexaoPadrao() {
+  localStorage.removeItem(CONEXAO_KEY);
+  mostrarConfigConexao(true);
+  authMsg('Voltou para o endereço original.', 'info');
 }
 
 function abrirTelaAcesso() {
@@ -4032,6 +4149,11 @@ async function criarContaNuvem() {
 
 function traduzErroAuth(msg) {
   const m = String(msg).toLowerCase();
+  // "Failed to fetch" não é senha errada: o servidor não respondeu.
+  if (m.includes('failed to fetch') || m.includes('networkerror') ||
+      m.includes('load failed') || m.includes('fetch failed')) {
+    return msgProjetoFora();
+  }
   if (m.includes('invalid login')) return 'E-mail ou senha incorretos.';
   if (m.includes('email not confirmed')) return 'Confirme o e-mail antes de entrar — veja sua caixa de entrada.';
   if (m.includes('already registered')) return 'Já existe conta com esse e-mail. Use Entrar.';
@@ -4289,6 +4411,10 @@ function renderNuvem() {
   if (nuvem.erro === 'biblioteca') {
     classe = 'erro'; curto = 'Sem conexão';
     longo = '⚠️ Não foi possível carregar a biblioteca do Supabase. Verifique sua internet — os dados continuam salvos neste navegador.';
+  } else if (nuvem.erro === 'projeto') {
+    classe = 'erro'; curto = 'Banco fora do ar';
+    longo = '⚠️ O projeto do Supabase não respondeu. Provavelmente foi pausado por inatividade — ' +
+            'entre em supabase.com e clique em Restore. Seus dados seguem salvos neste navegador.';
   } else if (nuvem.erro === 'tabelas') {
     classe = 'erro'; curto = 'Banco sem tabelas';
     longo = '⚠️ Conectado, mas o banco ainda não foi preparado. Abra o SQL Editor do Supabase e rode o arquivo supabase_schema.sql.';
