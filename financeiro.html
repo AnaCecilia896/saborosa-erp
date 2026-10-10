@@ -234,6 +234,21 @@
   .nuvem-badge.erro { background: #a93226; color: #ffe8e5; }
   .nuvem-badge.sync { background: #1a5276; color: #d6eaf8; }
 
+  /* ===== Parcelamento ===== */
+  .parc-bloco { border: 1px solid #e0dbd0; border-radius: 10px; padding: 14px 16px; margin-top: 16px; background: #fdfcfa; }
+  .parc-chk { display: flex; align-items: center; gap: 9px; font-size: 13.5px; font-weight: 600; color: #1a3a2a; cursor: pointer; }
+  .parc-chk input { width: 16px; height: 16px; accent-color: #2d6a4f; cursor: pointer; }
+  .parc-campos { margin-top: 14px; padding-top: 14px; border-top: 1px dashed #e0dbd0; }
+  .parc-preview { margin-top: 14px; }
+  .parc-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .parc-preview th { background: #f5f0e8; text-align: left; padding: 6px 8px; font-size: 10.5px; color: #555; text-transform: uppercase; letter-spacing: 0.3px; }
+  .parc-preview td { padding: 5px 8px; border-bottom: 0.5px solid #f2ede4; }
+  .parc-preview td.num, .parc-preview th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .parc-preview tr.ajuste td { background: #fffdf2; }
+  .parc-preview tfoot td { font-weight: 700; background: #f0faf4; border-top: 1px solid #d8e8dd; }
+  .parc-resumo { font-size: 12px; color: #777; margin-top: 8px; }
+  .st-parc { background: #ede7f6; color: #5b3f8e; }
+
   .arq-status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 10px 12px; border-radius: 8px; background: #f5f0e8; color: #666; margin-top: 10px; }
   .arq-status.on { background: #eafaf1; color: #1e5631; }
   .arq-status.warn { background: #fef9e7; color: #7d5c00; }
@@ -366,6 +381,52 @@
       <div class="field span2">
         <label>Observação</label>
         <input type="text" id="l-obs" placeholder="opcional">
+      </div>
+    </div>
+
+    <div class="parc-bloco" id="bloco-parcelamento">
+      <label class="parc-chk">
+        <input type="checkbox" id="l-parcelado" onchange="toggleParcelamento()">
+        Lançamento parcelado
+      </label>
+
+      <div class="parc-campos" id="parcelas-campos" style="display:none">
+        <div class="form-grid fg-4">
+          <div class="field">
+            <label>Nº de parcelas</label>
+            <input type="number" id="parc-qtd" min="2" max="60" value="2" oninput="previewParcelas()">
+          </div>
+          <div class="field">
+            <label>O valor informado é</label>
+            <select id="parc-base" onchange="previewParcelas()">
+              <option value="total">O total — dividir entre as parcelas</option>
+              <option value="parcela">O valor de cada parcela</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Intervalo</label>
+            <select id="parc-periodo" onchange="previewParcelas()">
+              <option value="mensal">Mensal</option>
+              <option value="quinzenal">Quinzenal (15 dias)</option>
+              <option value="semanal">Semanal (7 dias)</option>
+              <option value="dias">A cada N dias…</option>
+            </select>
+          </div>
+          <div class="field" id="campo-parc-dias" style="display:none">
+            <label>Dias entre parcelas</label>
+            <input type="number" id="parc-dias" min="1" max="365" value="30" oninput="previewParcelas()">
+          </div>
+          <div class="field span2">
+            <label>Mês de competência das parcelas</label>
+            <select id="parc-competencia" onchange="previewParcelas()">
+              <option value="mesma">Todas no mês informado acima — compra de insumos, mercadoria</option>
+              <option value="propria">Uma por parcela — assinatura, seguro, aluguel adiantado</option>
+            </select>
+            <span class="hintx">A competência define em que mês a despesa aparece na DRE. O vencimento define quando sai do caixa.</span>
+          </div>
+        </div>
+
+        <div class="parc-preview" id="parcelas-preview"></div>
       </div>
     </div>
 
@@ -1827,6 +1888,120 @@ function atualizarStatusPreview() {
     STATUS_LABEL[st] + (st === 'parcial' ? ' — falta ' + fmt(saldo) : '');
 }
 
+/* ---------- Parcelamento ---------- */
+
+function toISODate(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/** Soma meses mantendo o dia; se o mês destino não tiver aquele dia, cai no último. */
+function somarMeses(iso, n) {
+  const d = dISO(iso);
+  if (!d) return iso;
+  const dia = d.getDate();
+  const alvo = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const ultimoDia = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate();
+  alvo.setDate(Math.min(dia, ultimoDia));
+  return toISODate(alvo);
+}
+
+function somarDias(iso, n) {
+  const d = dISO(iso);
+  if (!d) return iso;
+  d.setDate(d.getDate() + n);
+  return toISODate(d);
+}
+
+function somarMesesComp(comp, n) {
+  if (!comp || comp.length < 7) return comp;
+  const [a, m] = comp.split('-').map(Number);
+  const d = new Date(a, m - 1 + n, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+/** Divide em centavos para a soma das parcelas bater exatamente com o total. */
+function dividirValor(total, n) {
+  const centavos = Math.round(n2(total) * 100);
+  const base = Math.floor(centavos / n);
+  const resto = centavos - base * n;
+  const out = [];
+  for (let i = 0; i < n; i++) out.push((base + (i === n - 1 ? resto : 0)) / 100);
+  return out;
+}
+
+function toggleParcelamento() {
+  const on = document.getElementById('l-parcelado').checked;
+  document.getElementById('parcelas-campos').style.display = on ? '' : 'none';
+  if (on) previewParcelas();
+}
+
+/** Monta a lista de parcelas a partir do que está no formulário. */
+function calcularParcelas() {
+  const qtd = Math.max(2, Math.min(60, parseInt(document.getElementById('parc-qtd').value, 10) || 2));
+  const periodo = document.getElementById('parc-periodo').value;
+  const dias = Math.max(1, parseInt(document.getElementById('parc-dias').value, 10) || 30);
+  const porParcela = document.getElementById('parc-base').value === 'parcela';
+  const compPropria = document.getElementById('parc-competencia').value === 'propria';
+
+  const valorInformado = n2(document.getElementById('l-valor').value);
+  const venc1 = document.getElementById('l-vencimento').value;
+  const comp1 = document.getElementById('l-competencia').value || (venc1 || '').slice(0, 7);
+
+  const total = porParcela ? n2(valorInformado * qtd) : valorInformado;
+  const valores = porParcela ? Array(qtd).fill(valorInformado) : dividirValor(total, qtd);
+
+  const parcelas = [];
+  for (let i = 0; i < qtd; i++) {
+    let venc;
+    if (periodo === 'mensal') venc = somarMeses(venc1, i);
+    else if (periodo === 'quinzenal') venc = somarDias(venc1, i * 15);
+    else if (periodo === 'semanal') venc = somarDias(venc1, i * 7);
+    else venc = somarDias(venc1, i * dias);
+
+    parcelas.push({
+      numero: i + 1,
+      de: qtd,
+      valor: valores[i],
+      vencimento: venc,
+      competencia: compPropria ? somarMesesComp(comp1, i) : comp1
+    });
+  }
+  return { parcelas, total: n2(valores.reduce((a, b) => a + b, 0)), qtd };
+}
+
+function previewParcelas() {
+  document.getElementById('campo-parc-dias').style.display =
+    document.getElementById('parc-periodo').value === 'dias' ? '' : 'none';
+
+  const alvo = document.getElementById('parcelas-preview');
+  const valor = n2(document.getElementById('l-valor').value);
+  const venc = document.getElementById('l-vencimento').value;
+
+  if (!valor || valor <= 0 || !venc) {
+    alvo.innerHTML = '<div class="parc-resumo">Informe o valor e a data de vencimento da primeira parcela para ver a simulação.</div>';
+    return;
+  }
+
+  const { parcelas, total } = calcularParcelas();
+  const iguais = parcelas.every(p => p.valor === parcelas[0].valor);
+
+  let html = '<table><thead><tr><th>Parcela</th><th>Vencimento</th><th>Competência</th><th class="num">Valor</th></tr></thead><tbody>';
+  parcelas.forEach(p => {
+    const ajustada = !iguais && p.valor !== parcelas[0].valor;
+    html += '<tr' + (ajustada ? ' class="ajuste"' : '') + '>' +
+      '<td><strong>' + p.numero + '/' + p.de + '</strong></td>' +
+      '<td>' + fmtData(p.vencimento) + '</td>' +
+      '<td>' + fmtCompetencia(p.competencia) + '</td>' +
+      '<td class="num">' + fmt(p.valor) + (ajustada ? ' <span class="st st-parc">ajuste</span>' : '') + '</td></tr>';
+  });
+  html += '</tbody><tfoot><tr><td colspan="3">Total</td><td class="num">' + fmt(total) + '</td></tr></tfoot></table>';
+
+  if (!iguais) {
+    html += '<div class="parc-resumo">A divisão não é exata: a diferença de centavos foi somada na última parcela para o total fechar certo.</div>';
+  }
+  alvo.innerHTML = html;
+}
+
 function salvarLancamento() {
   const dados = {
     natureza,
@@ -1848,6 +2023,11 @@ function salvarLancamento() {
 
   if (!dados.planoId) { flashMsg('lanc-msg', 'Selecione o plano de contas.', true); return; }
   if (!dados.valor || dados.valor <= 0) { flashMsg('lanc-msg', 'Informe um valor maior que zero.', true); return; }
+  if (!lancEditId && document.getElementById('l-parcelado').checked) {
+    const q = parseInt(document.getElementById('parc-qtd').value, 10);
+    if (!q || q < 2) { flashMsg('lanc-msg', 'O parcelamento precisa de pelo menos 2 parcelas.', true); return; }
+    if (q > 60) { flashMsg('lanc-msg', 'Máximo de 60 parcelas.', true); return; }
+  }
   if (!dados.dataVencimento) { flashMsg('lanc-msg', 'Informe a data de vencimento.', true); return; }
   if (!dados.dataEmissao) dados.dataEmissao = dados.dataVencimento;
   if (!dados.competencia) dados.competencia = dados.dataVencimento.slice(0, 7);
@@ -1857,10 +2037,40 @@ function salvarLancamento() {
     return;
   }
 
+  const parcelado = !lancEditId && document.getElementById('l-parcelado').checked;
+
   if (lancEditId) {
     const l = db.lancamentos.find(x => x.id === lancEditId);
     Object.assign(l, dados);
     flashMsg('lanc-msg', '✓ Lançamento atualizado.');
+  } else if (parcelado) {
+    const { parcelas, total } = calcularParcelas();
+    if (dados.dataPagamento) {
+      flashMsg('lanc-msg', 'Parcelamento não aceita data de pagamento no cadastro — dê baixa em cada parcela depois.', true);
+      return;
+    }
+    const grupo = uid('pg');
+    const criadoEm = new Date().toISOString();
+    parcelas.forEach(p => {
+      db.lancamentos.push(Object.assign({}, dados, {
+        id: uid('lc'),
+        valor: p.valor,
+        dataVencimento: p.vencimento,
+        competencia: p.competencia,
+        dataPagamento: '',
+        valorPago: 0,
+        // Desconto e acréscimo são por parcela: entram na baixa, não no cadastro.
+        desconto: 0,
+        acrescimo: 0,
+        doc: dados.doc ? dados.doc + ' (' + p.numero + '/' + p.de + ')' : '',
+        parcelaNum: p.numero,
+        parcelaDe: p.de,
+        parcelaGrupo: grupo,
+        conciliadoCom: null,
+        criadoEm
+      }));
+    });
+    flashMsg('lanc-msg', '✓ ' + parcelas.length + ' parcelas criadas — total ' + fmt(total) + '.');
   } else {
     db.lancamentos.push(Object.assign({ id: uid('lc'), conciliadoCom: null, criadoEm: new Date().toISOString() }, dados));
     flashMsg('lanc-msg', '✓ Lançamento registrado.');
@@ -1881,6 +2091,12 @@ function limparFormLanc() {
   document.getElementById('l-conta').value = '';
   delete document.getElementById('l-forma').dataset.tocado;
   delete document.getElementById('l-valorpago').dataset.tocado;
+  document.getElementById('l-parcelado').checked = false;
+  document.getElementById('parcelas-campos').style.display = 'none';
+  document.getElementById('parc-qtd').value = 2;
+  document.getElementById('parc-base').value = 'total';
+  document.getElementById('parc-periodo').value = 'mensal';
+  document.getElementById('parc-competencia').value = 'mesma';
   atualizarStatusPreview();
 }
 
@@ -1895,6 +2111,7 @@ function sugerirFormaPelaConta() {
 function cancelarEdicaoLanc() {
   lancEditId = null;
   limparFormLanc();
+  document.getElementById('bloco-parcelamento').style.display = '';
   document.getElementById('lanc-form-title').textContent = 'Novo Lançamento';
   document.getElementById('lanc-edit-flag').style.display = 'none';
   document.getElementById('btn-cancel-edit').style.display = 'none';
@@ -1921,6 +2138,7 @@ function editarLancamento(id) {
   document.getElementById('l-conta').value = l.contaId || '';
   document.getElementById('l-doc').value = l.doc || '';
   document.getElementById('l-obs').value = l.obs || '';
+  document.getElementById('bloco-parcelamento').style.display = 'none';
   document.getElementById('lanc-form-title').textContent = 'Editando lançamento';
   document.getElementById('lanc-edit-flag').style.display = '';
   document.getElementById('btn-cancel-edit').style.display = '';
@@ -1932,17 +2150,36 @@ function editarLancamento(id) {
 function excluirLancamento(id) {
   const l = db.lancamentos.find(x => x.id === id);
   if (!l) return;
-  if (l.conciliadoCom && !confirm('Este lançamento está conciliado com o extrato. Excluir mesmo assim?')) return;
-  if (!l.conciliadoCom && !confirm('Excluir este lançamento?')) return;
-  if (l.conciliadoCom) {
-    const tx = db.extrato.transacoes.find(t => t.id === l.conciliadoCom);
-    if (tx) tx.conciliadoCom = null;
+
+  // Parcela de um grupo: pergunta se apaga só esta ou o parcelamento inteiro.
+  let alvos = [l];
+  if (l.parcelaGrupo) {
+    const irmas = db.lancamentos.filter(x => x.parcelaGrupo === l.parcelaGrupo);
+    if (irmas.length > 1) {
+      const pagas = irmas.filter(x => statusLanc(x) === 'pago').length;
+      const texto = 'Parcela ' + l.parcelaNum + '/' + l.parcelaDe + ' de um parcelamento com ' + irmas.length + ' parcelas' +
+        (pagas ? ' (' + pagas + ' já paga(s))' : '') + '.' + '\n\n' +
+        'OK = excluir TODAS as ' + irmas.length + ' parcelas' + '\n' +
+        'Cancelar = excluir somente esta parcela';
+      alvos = confirm(texto) ? irmas : [l];
+      if (alvos.length === 1 && !confirm('Excluir somente a parcela ' + l.parcelaNum + '/' + l.parcelaDe + '?')) return;
+    }
   }
-  db.lancamentos = db.lancamentos.filter(x => x.id !== id);
+
+  const conciliados = alvos.filter(x => x.conciliadoCom);
+  if (conciliados.length && !confirm(conciliados.length + ' do(s) lançamento(s) está(ão) conciliado(s) com o extrato. Excluir mesmo assim?')) return;
+  if (!l.parcelaGrupo && !l.conciliadoCom && !confirm('Excluir este lançamento?')) return;
+
+  conciliados.forEach(x => {
+    const tx = db.extrato.transacoes.find(t => t.id === x.conciliadoCom);
+    if (tx) tx.conciliadoCom = null;
+  });
+  const apagar = new Set(alvos.map(x => x.id));
+  db.lancamentos = db.lancamentos.filter(x => !apagar.has(x.id));
   if (lancEditId === id) cancelarEdicaoLanc();
   salvarDB();
   renderTudo();
-  toast('Lançamento excluído.');
+  toast(alvos.length > 1 ? alvos.length + ' parcelas excluídas.' : 'Lançamento excluído.');
 }
 
 function baixarLancamento(id) {
@@ -2021,7 +2258,9 @@ function renderLancamentos() {
         '<td>' + fmtData(l.dataVencimento) + '<div style="font-size:10.5px;color:#bbb">em ' + fmtData(l.dataEmissao) + '</div></td>' +
         '<td><span class="st ' + (l.natureza === 'pagar' ? 'st-pagar' : 'st-receber') + '">' + (l.natureza === 'pagar' ? '↓ Pagar' : '↑ Receber') + '</span></td>' +
         '<td>' + esc(planoLabel(l.planoId)) + '<div style="font-size:10.5px;color:#bbb">' + esc(grupoNome((planoById(l.planoId) || {}).grupo)) + '</div></td>' +
-        '<td>' + esc(l.parceiro || '—') + (l.doc ? '<div style="font-size:10.5px;color:#bbb">NF ' + esc(l.doc) + '</div>' : '') + '</td>' +
+        '<td>' + esc(l.parceiro || '—') +
+          (l.parcelaDe ? ' <span class="st st-parc">' + l.parcelaNum + '/' + l.parcelaDe + '</span>' : '') +
+          (l.doc ? '<div style="font-size:10.5px;color:#bbb">NF ' + esc(l.doc) + '</div>' : '') + '</td>' +
         '<td>' + fmtCompetencia(l.competencia) + '</td>' +
         '<td class="num">' + fmt(l.valor) + '</td>' +
         '<td class="num">' + (l.desconto ? '−' + fmt(l.desconto) : '—') + '</td>' +
@@ -4499,6 +4738,11 @@ function init() {
     if (e.key === 'Enter') entrarNaNuvem();
   });
 
+  ['l-valor', 'l-vencimento', 'l-competencia'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+      if (document.getElementById('l-parcelado').checked) previewParcelas();
+    });
+  });
   document.getElementById('l-conta').addEventListener('change', sugerirFormaPelaConta);
   document.getElementById('l-forma').addEventListener('change', function () { this.dataset.tocado = '1'; });
 
